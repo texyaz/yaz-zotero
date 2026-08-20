@@ -1,0 +1,19 @@
+{
+  "name": "yaz-plugin-zotero",
+  "version": "0.2.0",
+  "description": "Cite from Zotero and quote highlighted passages, in yaz.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/main.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/texyaz/yaz-plugin-zotero.git"
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@yaz/api": "^0.2.0",
+    "typescript": "^6.0.0"
+  }
+}

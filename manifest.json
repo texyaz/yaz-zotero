@@ -1,0 +1,22 @@
+{
+  "id": "com.yaz.zotero",
+  "name": "Zotero",
+  "version": "0.2.0",
+  "minAppVersion": "0.2.0",
+  "author": "yaz",
+  "description": "Cite from your Zotero library, and quote the passages you highlighted.",
+  "repository": "https://github.com/texyaz/yaz-plugin-zotero",
+  "capabilities": [
+    {
+      "kind": "zotero"
+    },
+    {
+      "kind": "fs-project"
+    }
+  ],
+  "updates": {
+    "source": "github",
+    "repository": "texyaz/yaz-plugin-zotero",
+    "channel": "release"
+  }
+}
