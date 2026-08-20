@@ -48,8 +48,8 @@ test of the API rather than a privileged insider
 ## Development
 
 ```sh
-git clone https://github.com/texyaz/yaz-plugin-zotero
-cd yaz-plugin-zotero
+git clone https://github.com/texyaz/yaz-zotero
+cd yaz-zotero
 pnpm install
 pnpm check
 ```
