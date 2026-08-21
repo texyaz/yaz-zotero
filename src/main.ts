@@ -30,7 +30,7 @@ import {
   type ZoteroItem,
 } from "@yaz/api";
 
-import { readZoteroDrop } from "./drop";
+import { readZoteroDrop, readZoteroUris } from "./drop";
 import type { ZoteroDrop } from "./drop";
 import { citation, citations, quotation, unattributed } from "./latex";
 
@@ -85,7 +85,7 @@ export default class ZoteroPlugin extends Plugin {
      * compiler will resolve, which is why both are asked for.
      */
     this.registerDropHandler({
-      flavours: ["text/html", "text/plain"],
+      flavours: ["text/html", "text/plain", "text/uri-list"],
       handle: (dropped) => this.dropped(dropped),
     });
 
@@ -218,7 +218,16 @@ export default class ZoteroPlugin extends Plugin {
    * puts the text in as text.
    */
   private async dropped(data: DroppedData): Promise<string | null> {
-    const drop = readZoteroDrop(data.flavours["text/html"] ?? "", data.text);
+    let drop = readZoteroDrop(data.flavours["text/html"] ?? "", data.text);
+
+    // One more place a link can be. Some drags put the `zotero://` URI in
+    // `text/uri-list` and nowhere else, and a drop that landed as prose when
+    // the item was named right there would be the bug this whole path exists
+    // to avoid.
+    if (drop.kind === "text") {
+      drop = readZoteroUris(data.flavours["text/uri-list"] ?? "") ?? drop;
+    }
+
     switch (drop.kind) {
       case "annotation":
         return this.droppedPassage(drop);
@@ -400,11 +409,18 @@ function describe(item: ZoteroItem): string | undefined {
  * der Informationslieferungen, Jan. 2025." into something the library will
  * match.
  */
-function searchable(text: string): string {
-  return text
-    .replace(/,\s*[A-Za-zÄÖÜäöü.]*\s*\d{4}\.?\s*$/, "")
-    .replace(/[.,;]+\s*$/, "")
-    .trim();
+export function searchable(text: string): string {
+  return (
+    text
+      // The number a numeric style puts in front: `[1] DIN EN ISO 29481-1 …`.
+      .replace(/^\s*\[\d+\]\s*/, "")
+      // An author-date style's leading marker, for the same reason.
+      .replace(/^\s*\(\d+\)\s*/, "")
+      // The date a style appends: `, Jan. 2025.`
+      .replace(/,\s*[A-Za-zÄÖÜäöü.]*\s*\d{4}\.?\s*$/, "")
+      .replace(/[.,;]+\s*$/, "")
+      .trim()
+  );
 }
 
 /** Collapse whitespace and elide a long passage for display. */

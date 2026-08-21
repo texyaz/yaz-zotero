@@ -18,10 +18,21 @@ current.
 | Drag a highlight in | `\textquote[\cite[8]{key}]{…}` |
 | Connect | Reports which source is answering, and offers to start Zotero |
 
-Dragging reads the **machine-readable** half of what Zotero puts on the drag —
-the `data-citation` and `data-annotation` blobs in the `text/html` flavour —
-rather than the formatted prose in `text/plain`. See `src/drop.ts` for why, and
-for why we do not ask anybody to change their Zotero settings to make this work.
+Dragging reads the **machine-readable** half of what Zotero puts on the drag
+rather than the formatted prose. Which half that is depends on the user's Quick
+Copy setting, and both shapes are read:
+
+| Quick Copy is | What arrives | Where the item key is |
+| --- | --- | --- |
+| A citation style | `data-citation` / `data-annotation` on the HTML | URI-encoded JSON |
+| A Markdown format | `zotero://select` and `zotero://open-pdf` links | the link itself |
+
+See `src/drop.ts` for why, and for why we do not ask anybody to change their
+Zotero settings to make this work.
+
+A drag that carries neither — a numeric citation style produces a bibliography
+entry with no link in it — falls back to searching the library for the title,
+and is only acted on when exactly one item matches.
 
 ## Next
 
