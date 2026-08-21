@@ -172,12 +172,19 @@ export default class ZoteroPlugin extends Plugin {
     }
   }
 
-  /** The source picker. */
-  private pickItem(): Promise<ZoteroItem | null> {
+  /**
+   * The source picker.
+   *
+   * `seed` is what a failed drop was trying to identify. The picker filters on
+   * it, so a drag that carried no machine data becomes one click rather than a
+   * paragraph of prose the author has to notice is not a citation.
+   */
+  private pickItem(seed?: string): Promise<ZoteroItem | null> {
     return this.app.ui.pick<ZoteroItem>({
       titleKey: "zotero-picker-source-title",
       placeholderKey: "zotero-picker-source-placeholder",
       emptyKey: "zotero-picker-source-empty",
+      ...(seed ? { query: seed } : {}),
       // A function rather than an array: the library is far too large to send at
       // once, so each keystroke is a query.
       items: async (query) => {
@@ -327,21 +334,38 @@ export default class ZoteroPlugin extends Plugin {
     if (!drop.text) return null;
 
     const query = searchable(drop.text);
-    if (query.length >= MIN_MATCH_LENGTH) {
-      const found = await this.app.zotero.search(query, 2);
-      if (found.length === 1) {
-        const entry = await this.app.zotero.ensureInBibliography(
-          found[0]!.key,
-          this.declaredBibliography(),
-        );
-        return citation(entry.key);
-      }
-    }
+    if (query.length < MIN_MATCH_LENGTH) return null;
 
-    // Not a source we can name. Declining hands it back to the editor, which
-    // inserts the words — the same thing that would have happened before any of
-    // this existed.
-    return null;
+    // One match is an answer. Two are a coincidence, and a wrong citation key
+    // compiles perfectly while citing something the author never read.
+    const found = await this.app.zotero.search(query, 2);
+    if (found.length === 1) return this.cited(found[0]!.key);
+
+    /*
+     * More than one, or none: ask.
+     *
+     * The alternative — inserting the words and leaving it — is what a webpage
+     * or a standard dragged out of the library used to do, because a citation
+     * style's bibliography entry carries no link and there is nothing in it to
+     * resolve. But the author is standing right there having just dragged the
+     * thing, and one click is a much better answer than a paragraph of prose
+     * they have to notice is not a citation.
+     *
+     * Seeded with what they dropped, so the row they want is usually the first
+     * one. Dismissing the picker falls back to the text, which is what would
+     * have happened anyway.
+     */
+    const picked = await this.pickItem(query);
+    return picked ? this.cited(picked.key) : null;
+  }
+
+  /** Put an item in the project's bibliography and return the LaTeX to cite it. */
+  private async cited(itemKey: string): Promise<string> {
+    const entry = await this.app.zotero.ensureInBibliography(
+      itemKey,
+      this.declaredBibliography(),
+    );
+    return citation(entry.key);
   }
 
   /**
