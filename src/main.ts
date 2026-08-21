@@ -49,6 +49,27 @@ const PREVIEW_LENGTH = 240;
  */
 const MIN_MATCH_LENGTH = 12;
 
+/**
+ * The `.bib` a document says it loads, or null where it says nothing.
+ *
+ * This is not a nicety. `ensureInBibliography` defaults to `references.bib`,
+ * and a document whose preamble says `\\addbibresource{BIMwissT.bib}` then gets its
+ * entries written to a file LaTeX never reads — the key is on disk, the
+ * citation stays unresolved, and nothing about it looks wrong. So the
+ * declaration is read from the buffer and it decides where the entry goes.
+ *
+ * Only the first: biblatex takes several resources, and a new entry has to go
+ * in one of them. The first is the one the author wrote first.
+ */
+export function declaredBibliography(text: string): string | undefined {
+  const resource = /\\addbibresource\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/.exec(text);
+  const classic = /\\bibliography\s*\{([^}]*)\}/.exec(text);
+  const name = (resource?.[1] ?? classic?.[1]?.split(",")[0] ?? "").trim();
+  if (!name) return undefined;
+  // `\bibliography{refs}` omits the extension; `\addbibresource{refs.bib}` does not.
+  return /\.bib$/i.test(name) ? name : `${name}.bib`;
+}
+
 /** How many times to look for a Zotero that has just been started. */
 const LAUNCH_ATTEMPTS = 12;
 
@@ -131,7 +152,10 @@ export default class ZoteroPlugin extends Plugin {
       if (!annotation) return;
     }
 
-    const entry = await this.app.zotero.ensureInBibliography(item.key);
+    const entry = await this.app.zotero.ensureInBibliography(
+      item.key,
+      declaredBibliography(editor.getText()),
+    );
     editor.insertAtCursor(
       annotation
         ? quotation(annotation.text, entry.key, annotation.pageLabel)
@@ -210,6 +234,12 @@ export default class ZoteroPlugin extends Plugin {
     });
   }
 
+  /** The `.bib` the open document loads, for the drop paths. */
+  private declaredBibliography(): string | undefined {
+    const text = this.app.editor?.getText();
+    return text ? declaredBibliography(text) : undefined;
+  }
+
   /**
    * Turn a drag out of Zotero into LaTeX, or decline it.
    *
@@ -250,7 +280,10 @@ export default class ZoteroPlugin extends Plugin {
       this.app.notices.show("zotero-notice-drop-unresolved");
       return unattributed(drop.text);
     }
-    const entry = await this.app.zotero.ensureInBibliography(drop.itemKey);
+    const entry = await this.app.zotero.ensureInBibliography(
+      drop.itemKey,
+      this.declaredBibliography(),
+    );
     return quotation(drop.text, entry.key, drop.pageLabel);
   }
 
@@ -260,8 +293,14 @@ export default class ZoteroPlugin extends Plugin {
   ): Promise<string | null> {
     const keys: string[] = [];
     let pageLabel: string | null = null;
+    // Read once: every entry goes in the same file, and asking the editor per
+    // item would re-read the whole buffer for each one.
+    const bib = this.declaredBibliography();
     for (const item of drop.items) {
-      const entry = await this.app.zotero.ensureInBibliography(item.itemKey);
+      const entry = await this.app.zotero.ensureInBibliography(
+        item.itemKey,
+        bib,
+      );
       keys.push(entry.key);
       pageLabel ??= item.locator;
     }
@@ -291,7 +330,10 @@ export default class ZoteroPlugin extends Plugin {
     if (query.length >= MIN_MATCH_LENGTH) {
       const found = await this.app.zotero.search(query, 2);
       if (found.length === 1) {
-        const entry = await this.app.zotero.ensureInBibliography(found[0]!.key);
+        const entry = await this.app.zotero.ensureInBibliography(
+          found[0]!.key,
+          this.declaredBibliography(),
+        );
         return citation(entry.key);
       }
     }
