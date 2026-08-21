@@ -59,6 +59,11 @@ To run it against a local yaz, point yaz at this directory in
 commit, no push, no release — see
 [writing a plugin](https://texyaz.github.io/yaz/plugins/writing-a-plugin).
 
+## Roadmap
+
+What is built, what is next, and what has been deliberately left undone — the
+library on zotero.org among it: [ROADMAP.md](ROADMAP.md).
+
 ## Licence
 
 MIT. The application is AGPL-3.0, but its plugin API is MIT and so is this, so
