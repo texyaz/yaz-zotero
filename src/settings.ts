@@ -24,9 +24,24 @@
 import type { App, BibliographyFields, CitationKeyScheme } from "@yaz/api";
 
 /** Everything this plugin stores. */
+/**
+ * What becomes of the note a reader wrote on a highlight.
+ *
+ * It is *their* words, not the source's, so it is never part of the quotation.
+ * What is left is where it goes, and that depends on how somebody works:
+ *
+ * - `ignore` — drop it. The quotation is the quotation.
+ * - `text` — put it after the quotation, to write from. It will print if it is
+ *   left there, which is the point and also the risk.
+ * - `comment` — leave it as a LaTeX `%` comment: visible while writing, never
+ *   printed, and gone the moment it is deleted.
+ */
+export type CommentHandling = "ignore" | "text" | "comment";
+
 export interface ZoteroSettings {
   keyScheme: CitationKeyScheme;
   fields: BibliographyFields;
+  comments: CommentHandling;
 }
 
 /** What a fresh installation behaves as. */
@@ -45,7 +60,13 @@ export const DEFAULT_SETTINGS: ZoteroSettings = {
     // can read is a `.bib` nobody will correct.
     summary: false,
   },
+  // Dropped, because a note that silently prints is the surprise worth
+  // avoiding — and the other two are one click away for anyone who wants them.
+  comments: "ignore",
 };
+
+/** How a comment may be handled, in the order the panel offers them. */
+const COMMENT_CHOICES: readonly CommentHandling[] = ["ignore", "text", "comment"];
 
 /** The field groups, and the message keys naming them. */
 const FIELD_GROUPS: readonly (keyof BibliographyFields)[] = [
@@ -77,6 +98,9 @@ export async function readSettings(app: App): Promise<ZoteroSettings> {
       ? (scheme as CitationKeyScheme)
       : DEFAULT_SETTINGS.keyScheme,
     fields: { ...DEFAULT_SETTINGS.fields, ...(stored?.fields ?? {}) },
+    comments: COMMENT_CHOICES.includes(stored?.comments as CommentHandling)
+      ? (stored?.comments as CommentHandling)
+      : DEFAULT_SETTINGS.comments,
   };
 }
 
@@ -189,6 +213,54 @@ export function renderSettings(app: App, container: HTMLElement): void {
     }
 
     container.append(written);
+
+    const notes = document.createElement("fieldset");
+    notes.className = "yaz-zotero-settings";
+
+    const notesTitle = document.createElement("legend");
+    notesTitle.textContent = app.i18n.t("zotero-settings-comments");
+    notes.append(notesTitle);
+
+    const notesWhy = document.createElement("p");
+    notesWhy.className = "yaz-zotero-note";
+    notesWhy.textContent = app.i18n.t("zotero-settings-comments-detail");
+    notes.append(notesWhy);
+
+    for (const choice of COMMENT_CHOICES) {
+      const row = document.createElement("label");
+      row.className = "yaz-zotero-choice";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "yaz-zotero-comments";
+      radio.value = choice;
+      radio.checked = current.comments === choice;
+      radio.addEventListener("change", () => {
+        if (!radio.checked) return;
+        const next: ZoteroSettings = { ...current, comments: choice };
+        void app.settings.set(next).then(() => {
+          draw(next);
+          app.notices.show("zotero-settings-saved");
+        });
+      });
+
+      const words = document.createElement("span");
+      words.className = "yaz-zotero-choice-text";
+
+      const name = document.createElement("span");
+      name.className = "yaz-zotero-choice-label";
+      name.textContent = app.i18n.t(`zotero-comments-${choice}`);
+
+      const detail = document.createElement("span");
+      detail.className = "yaz-zotero-choice-detail";
+      detail.textContent = app.i18n.t(`zotero-comments-${choice}-detail`);
+
+      words.append(name, detail);
+      row.append(radio, words);
+      notes.append(row);
+    }
+
+    container.append(notes);
   };
 
   void readSettings(app).then(draw);

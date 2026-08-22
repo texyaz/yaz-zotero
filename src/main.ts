@@ -32,9 +32,16 @@ import {
 
 import { readZoteroDrop, readZoteroUris } from "./drop";
 import { readSettings, renderSettings } from "./settings";
+import type { CommentHandling } from "./settings";
 import { SETTINGS_STYLE } from "./style";
 import type { ZoteroDrop } from "./drop";
-import { citation, citations, quotation, unattributed } from "./latex";
+import {
+  citation,
+  citations,
+  escapeLatex,
+  quotation,
+  unattributed,
+} from "./latex";
 
 /** How many library rows to request per keystroke. */
 const PAGE_SIZE = 50;
@@ -299,21 +306,31 @@ export default class ZoteroPlugin extends Plugin {
     drop: Extract<ZoteroDrop, { kind: "annotation" }>,
   ): Promise<string | null> {
     if (!drop.text) return null;
+    const settings = await readSettings(this.app);
+
     if (!drop.itemKey) {
       // The words are real and the source is not identified. Quoting them
       // unattributed is honest and leaves the author one thing to fill in;
       // inventing a key would leave them nothing to notice.
       this.app.notices.show("zotero-notice-drop-unresolved");
-      return unattributed(drop.text);
+      return withComment(
+        unattributed(drop.text),
+        drop.comment,
+        settings.comments,
+      );
     }
-    const settings = await readSettings(this.app);
+
     const entry = await this.app.zotero.ensureInBibliography(
       drop.itemKey,
       this.declaredBibliography(),
       settings.keyScheme,
       settings.fields,
     );
-    return quotation(drop.text, entry.key, drop.pageLabel);
+    return withComment(
+      quotation(drop.text, entry.key, drop.pageLabel),
+      drop.comment,
+      settings.comments,
+    );
   }
 
   /** One or more sources dragged out of the library. */
@@ -605,6 +622,30 @@ export function searchQueries(text: string, html = ""): string[] {
   add(whole);
 
   return queries;
+}
+
+/**
+ * The quotation, and the reader's note on it where they want one.
+ *
+ * Never inside the quotation, whichever way this goes: the note is the
+ * reader's words and the passage is the source's, and a quotation that
+ * silently contained somebody's own note would be a misattribution the author
+ * would have to spot themselves.
+ */
+function withComment(
+  latex: string,
+  comment: string,
+  handling: CommentHandling,
+): string {
+  const note = comment.replace(/\s+/g, " ").trim();
+  if (!note || handling === "ignore") return latex;
+  return handling === "comment"
+    ? // A LaTeX comment: on screen while writing, never printed, and gone the
+      // moment it is deleted.
+      `${latex}\n% ${note}`
+    : // Text to write from, which will print if it is left there. That is the
+      // point of the setting and also its risk, which is why it is not default.
+      `${latex} ${escapeLatex(note)}`;
 }
 
 /** Strip what a citation style added, leaving what identifies the work. */

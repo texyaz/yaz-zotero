@@ -61,6 +61,13 @@ export interface ZoteroDropAnnotation {
   annotationKey: string | null;
   /** The marked words, with the quotation marks Zotero added taken off. */
   text: string;
+  /**
+   * The reader's own note on the mark, where they wrote one.
+   *
+   * Theirs, not the source's — so it is never part of the quotation, and what
+   * becomes of it is a setting rather than a decision.
+   */
+  comment: string;
   /** The page as the document labels it, which is not always a number. */
   pageLabel: string | null;
 }
@@ -185,12 +192,13 @@ function fromLinks(links: readonly string[], text: string): ZoteroDrop | null {
 
   // A mark: the passage is what was dragged, and the links are its attribution.
   if (annotation) {
-    const passage = unquote(withoutLinks(text));
+    const split = splitQuoted(withoutLinks(text));
     return {
       kind: "annotation",
       itemKey: select.map(itemKeyFromUri).find(Boolean) ?? null,
       annotationKey: annotation,
-      text: passage,
+      text: split.passage,
+      comment: split.comment,
       pageLabel: opened ? parameter(opened, "page") : null,
     };
   }
@@ -255,6 +263,50 @@ function citedItems(
  * sets, one of them wrong.
  */
 const QUOTES = ['"', "'", "“", "”", "„", "«", "»"];
+
+/**
+ * The quoted passage, and whatever Zotero put after it.
+ *
+ * A highlight with a comment on it drags as
+ *
+ * > “…vorzugsweise onlin” Test
+ *
+ * where `Test` is the reader's own note. Stripping the marks off *the ends*
+ * missed that: the leading `“` came off and the trailing character was `t`, so
+ * the closing `”` stayed in the middle of the passage and the note stayed on
+ * the end of it. What came out was a quotation attributing the reader's note to
+ * the source, with a stray quotation mark inside it.
+ *
+ * So the passage is what is *between* the marks, and anything after the closing
+ * one is the comment — which is the reader's, not the source's, and is treated
+ * as such.
+ *
+ * Text that does not begin with a quotation mark is all passage. `the so-called
+ * "smart" building` is a highlight, not a highlight with a note.
+ */
+export function splitQuoted(text: string): {
+  passage: string;
+  comment: string;
+} {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (trimmed.length < 2 || !QUOTES.includes(trimmed[0]!)) {
+    return { passage: trimmed, comment: "" };
+  }
+
+  let closing = -1;
+  for (let at = trimmed.length - 1; at > 0; at -= 1) {
+    if (QUOTES.includes(trimmed[at]!)) {
+      closing = at;
+      break;
+    }
+  }
+  if (closing <= 0) return { passage: trimmed.slice(1), comment: "" };
+
+  return {
+    passage: trimmed.slice(1, closing).trim(),
+    comment: trimmed.slice(closing + 1).trim(),
+  };
+}
 
 /** Strip the marks and collapse the line breaks PDF extraction leaves behind. */
 export function unquote(text: string): string {
@@ -374,7 +426,10 @@ function readAttributes(document: Document): ZoteroDrop | null {
       annotationKey: field(annotation, "annotationKey"),
       // The words are in the element, not in the blob: Zotero puts the payload
       // on the span and the passage inside it.
-      text: unquote(marked.textContent ?? ""),
+      text: splitQuoted(marked.textContent ?? "").passage,
+      // A citation-style drag keeps the reader's note in the blob rather than
+      // after the passage, which is the one thing this shape makes easier.
+      comment: field(annotation, "annotationComment") ?? "",
       pageLabel: field(annotation, "pageLabel") ?? cited[0]?.locator ?? null,
     };
   }
