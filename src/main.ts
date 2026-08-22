@@ -31,6 +31,8 @@ import {
 } from "@yaz/api";
 
 import { readZoteroDrop, readZoteroUris } from "./drop";
+import { readSettings, renderSettings } from "./settings";
+import { SETTINGS_STYLE } from "./style";
 import type { ZoteroDrop } from "./drop";
 import { citation, citations, quotation, unattributed } from "./latex";
 
@@ -110,6 +112,12 @@ export default class ZoteroPlugin extends Plugin {
       handle: (dropped) => this.dropped(dropped),
     });
 
+    this.addSettingsTab({
+      titleKey: "zotero-settings-title",
+      render: (container) => renderSettings(this.app, container),
+    });
+    styleOnce();
+
     this.addCommand({
       id: "reconnect",
       nameKey: "zotero-command-reconnect",
@@ -155,6 +163,7 @@ export default class ZoteroPlugin extends Plugin {
     const entry = await this.app.zotero.ensureInBibliography(
       item.key,
       declaredBibliography(editor.getText()),
+      (await readSettings(this.app)).keyScheme,
     );
     editor.insertAtCursor(
       annotation
@@ -290,6 +299,7 @@ export default class ZoteroPlugin extends Plugin {
     const entry = await this.app.zotero.ensureInBibliography(
       drop.itemKey,
       this.declaredBibliography(),
+      (await readSettings(this.app)).keyScheme,
     );
     return quotation(drop.text, entry.key, drop.pageLabel);
   }
@@ -303,10 +313,12 @@ export default class ZoteroPlugin extends Plugin {
     // Read once: every entry goes in the same file, and asking the editor per
     // item would re-read the whole buffer for each one.
     const bib = this.declaredBibliography();
+    const scheme = (await readSettings(this.app)).keyScheme;
     for (const item of drop.items) {
       const entry = await this.app.zotero.ensureInBibliography(
         item.itemKey,
         bib,
+        scheme,
       );
       keys.push(entry.key);
       pageLabel ??= item.locator;
@@ -364,6 +376,7 @@ export default class ZoteroPlugin extends Plugin {
     const entry = await this.app.zotero.ensureInBibliography(
       itemKey,
       this.declaredBibliography(),
+      (await readSettings(this.app)).keyScheme,
     );
     return citation(entry.key);
   }
@@ -454,6 +467,23 @@ export default class ZoteroPlugin extends Plugin {
     }
     this.app.notices.show("zotero-notice-launch-slow");
   }
+}
+
+/**
+ * The settings panel's own styling, added once.
+ *
+ * A stylesheet rather than inline styles so the colours are the theme's tokens:
+ * yaz forbids a literal colour in its own components (ADR-0010), and a plugin
+ * that painted itself would be the one thing on screen ignoring the theme the
+ * user chose.
+ */
+function styleOnce(): void {
+  const id = "yaz-zotero-style";
+  if (document.getElementById(id)) return;
+  const sheet = document.createElement("style");
+  sheet.id = id;
+  sheet.textContent = SETTINGS_STYLE;
+  document.head.append(sheet);
 }
 
 /** Author and year, as a picker row's secondary text. */
