@@ -119,6 +119,14 @@ export default class ZoteroPlugin extends Plugin {
     styleOnce();
 
     this.addCommand({
+      id: "refresh-bibliography",
+      nameKey: "zotero-command-refresh",
+      descriptionKey: "zotero-command-refresh-description",
+      isAvailable: () => this.app.project !== null,
+      callback: () => this.refreshBibliography(),
+    });
+
+    this.addCommand({
       id: "reconnect",
       nameKey: "zotero-command-reconnect",
       descriptionKey: "zotero-command-reconnect-description",
@@ -160,10 +168,12 @@ export default class ZoteroPlugin extends Plugin {
       if (!annotation) return;
     }
 
+    const settings = await readSettings(this.app);
     const entry = await this.app.zotero.ensureInBibliography(
       item.key,
       declaredBibliography(editor.getText()),
-      (await readSettings(this.app)).keyScheme,
+      settings.keyScheme,
+      settings.fields,
     );
     editor.insertAtCursor(
       annotation
@@ -280,7 +290,7 @@ export default class ZoteroPlugin extends Plugin {
       case "citation":
         return this.droppedSources(drop);
       default:
-        return this.droppedProse(drop);
+        return this.droppedProse(drop, data.flavours["text/html"] ?? "");
     }
   }
 
@@ -296,10 +306,12 @@ export default class ZoteroPlugin extends Plugin {
       this.app.notices.show("zotero-notice-drop-unresolved");
       return unattributed(drop.text);
     }
+    const settings = await readSettings(this.app);
     const entry = await this.app.zotero.ensureInBibliography(
       drop.itemKey,
       this.declaredBibliography(),
-      (await readSettings(this.app)).keyScheme,
+      settings.keyScheme,
+      settings.fields,
     );
     return quotation(drop.text, entry.key, drop.pageLabel);
   }
@@ -313,12 +325,13 @@ export default class ZoteroPlugin extends Plugin {
     // Read once: every entry goes in the same file, and asking the editor per
     // item would re-read the whole buffer for each one.
     const bib = this.declaredBibliography();
-    const scheme = (await readSettings(this.app)).keyScheme;
+    const settings = await readSettings(this.app);
     for (const item of drop.items) {
       const entry = await this.app.zotero.ensureInBibliography(
         item.itemKey,
         bib,
-        scheme,
+        settings.keyScheme,
+        settings.fields,
       );
       keys.push(entry.key);
       pageLabel ??= item.locator;
@@ -342,41 +355,47 @@ export default class ZoteroPlugin extends Plugin {
    */
   private async droppedProse(
     drop: Extract<ZoteroDrop, { kind: "text" }>,
+    html: string,
   ): Promise<string | null> {
     if (!drop.text) return null;
 
-    const query = searchable(drop.text);
-    if (query.length < MIN_MATCH_LENGTH) return null;
-
-    // One match is an answer. Two are a coincidence, and a wrong citation key
-    // compiles perfectly while citing something the author never read.
-    const found = await this.app.zotero.search(query, 2);
-    if (found.length === 1) return this.cited(found[0]!.key);
+    /*
+     * Try the narrow queries before the wide one.
+     *
+     * One match is an answer; two are a coincidence, and a wrong citation key
+     * compiles perfectly while citing something the author never read. So a
+     * query that finds several does not decide anything — it seeds the picker,
+     * where a person decides.
+     */
+    let seed = "";
+    for (const query of searchQueries(drop.text, html)) {
+      const found = await this.app.zotero.search(query, 2);
+      if (found.length === 1) return this.cited(found[0]!.key);
+      // Remember the first query that found *anything*, so the picker opens
+      // somewhere useful rather than on a filter matching nothing.
+      if (found.length > 1 && !seed) seed = query;
+    }
 
     /*
-     * More than one, or none: ask.
+     * Ask.
      *
-     * The alternative — inserting the words and leaving it — is what a webpage
-     * or a standard dragged out of the library used to do, because a citation
-     * style's bibliography entry carries no link and there is nothing in it to
-     * resolve. But the author is standing right there having just dragged the
-     * thing, and one click is a much better answer than a paragraph of prose
-     * they have to notice is not a citation.
-     *
-     * Seeded with what they dropped, so the row they want is usually the first
-     * one. Dismissing the picker falls back to the text, which is what would
-     * have happened anyway.
+     * Seeded only where a query actually matched something. Opening the picker
+     * filtered by a string that matches nothing shows an empty list and reads
+     * as "your library does not have this" — which is exactly what a dropped
+     * book reported, while the book was sitting in the library.
      */
-    const picked = await this.pickItem(query);
+    const picked = await this.pickItem(seed || undefined);
     return picked ? this.cited(picked.key) : null;
   }
 
   /** Put an item in the project's bibliography and return the LaTeX to cite it. */
   private async cited(itemKey: string): Promise<string> {
+    const settings = await readSettings(this.app);
     const entry = await this.app.zotero.ensureInBibliography(
       itemKey,
       this.declaredBibliography(),
-      (await readSettings(this.app)).keyScheme,
+      settings.keyScheme,
+      settings.fields,
     );
     return citation(entry.key);
   }
@@ -390,6 +409,44 @@ export default class ZoteroPlugin extends Plugin {
    * or carry on with the offline copy, which is a real answer and not a
    * consolation prize (it is the fast query path either way).
    */
+  /**
+   * Rewrite every entry this wrote, from what Zotero says now.
+   *
+   * Asked for rather than automatic. It rewrites a file the author may have
+   * edited by hand, and doing that in the background is how somebody loses a
+   * correction they made and never mentioned.
+   */
+  private async refreshBibliography(): Promise<void> {
+    const editor = this.app.editor;
+    if (!editor) {
+      this.app.notices.show("zotero-notice-no-editor");
+      return;
+    }
+    try {
+      const settings = await readSettings(this.app);
+      const outcome = await this.app.zotero.refreshBibliography(
+        declaredBibliography(editor.getText()),
+        settings.fields,
+      );
+      if (outcome.missing.length > 0) {
+        // Named rather than counted: a reference whose item has gone from the
+        // library is one the author has to decide about, and they cannot
+        // decide about a number.
+        this.app.notices.show("zotero-notice-refresh-missing", {
+          count: outcome.updated,
+          keys: outcome.missing.join(", "),
+        });
+      } else {
+        this.app.notices.show("zotero-notice-refreshed", {
+          count: outcome.updated,
+        });
+      }
+    } catch (error) {
+      this.app.notices.show("zotero-notice-refresh-failed");
+      console.warn("[yaz] refreshing the bibliography failed", error);
+    }
+  }
+
   private async reconnect(): Promise<void> {
     await this.app.zotero.refresh();
     const status = await this.app.zotero.status();
@@ -497,14 +554,60 @@ function describe(item: ZoteroItem): string | undefined {
 }
 
 /**
- * The part of a formatted reference worth searching for.
+ * Queries to try for a reference that carries no link, best first.
  *
- * The trailing date and the punctuation around it are the parts a citation
- * style adds; the title is the part that identifies the work. Dropping the tail
- * is what turns "DIN EN ISO 29481-1 IDM Bauwerksinformationsmodelle Handbuch
- * der Informationslieferungen, Jan. 2025." into something the library will
- * match.
+ * The whole formatted string is the *worst* query and was the only one tried,
+ * which is why dropping an ordinary book found nothing: Zotero matches a title
+ * or a creator, and
+ *
+ * > H. Spielbauer, K.-P. Ruland, and Beirat Baukosteninformationszentrum, BKI
+ * > Baukosten 2020 Neubau Statistische Kostenkennwerte für Gebäude, Stuttgart
+ *
+ * is neither — it is a style's concatenation of both, and nothing in the
+ * library is called that. A standard happens to work only because its title is
+ * nearly the whole entry.
+ *
+ * So the title is looked for. Two ways, in order of how reliable they are:
+ *
+ * 1. **What the style italicised.** Every style that italicises anything
+ *    italicises the title, and that is a fact about the markup rather than a
+ *    guess about the prose.
+ * 2. **The longest comma-separated part.** Authors are short and places are
+ *    shorter; the title is almost always the longest thing between two commas.
+ *
+ * The whole string stays on the list last, because for a standard it is right.
  */
+export function searchQueries(text: string, html = ""): string[] {
+  const queries: string[] = [];
+  const add = (candidate: string): void => {
+    const cleaned = candidate.replace(/\s+/g, " ").trim();
+    if (cleaned.length >= MIN_MATCH_LENGTH && !queries.includes(cleaned)) {
+      queries.push(cleaned);
+    }
+  };
+
+  if (html) {
+    try {
+      const parsed = new DOMParser().parseFromString(html, "text/html");
+      for (const italic of parsed.querySelectorAll("i, em, cite")) {
+        add(italic.textContent ?? "");
+      }
+    } catch {
+      // Unparseable markup is one fewer candidate, not a failure.
+    }
+  }
+
+  const whole = searchable(text);
+  const parts = [...whole.split(",")].sort(
+    (left, right) => right.trim().length - left.trim().length,
+  );
+  if (parts.length > 1) add(parts[0] ?? "");
+  add(whole);
+
+  return queries;
+}
+
+/** Strip what a citation style added, leaving what identifies the work. */
 export function searchable(text: string): string {
   return (
     text

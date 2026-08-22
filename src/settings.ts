@@ -21,11 +21,12 @@
  * key by hand does not produce a duplicate.
  */
 
-import type { App, CitationKeyScheme } from "@yaz/api";
+import type { App, BibliographyFields, CitationKeyScheme } from "@yaz/api";
 
 /** Everything this plugin stores. */
 export interface ZoteroSettings {
   keyScheme: CitationKeyScheme;
+  fields: BibliographyFields;
 }
 
 /** What a fresh installation behaves as. */
@@ -33,7 +34,26 @@ export const DEFAULT_SETTINGS: ZoteroSettings = {
   // Legible in the source, and needs nothing installed. The other two are
   // improvements for people who know they want them.
   keyScheme: "readable",
+  fields: {
+    // Written by default, because biber ignores a field the style does not
+    // print: too much costs a longer file, too little costs a reference that
+    // loses its publisher when the author changes style.
+    publication: true,
+    location: true,
+    identifiers: true,
+    // The exception. An abstract is a paragraph per entry, and a `.bib` nobody
+    // can read is a `.bib` nobody will correct.
+    summary: false,
+  },
 };
+
+/** The field groups, and the message keys naming them. */
+const FIELD_GROUPS: readonly (keyof BibliographyFields)[] = [
+  "publication",
+  "location",
+  "identifiers",
+  "summary",
+];
 
 /** The schemes, in the order the panel offers them. */
 const SCHEMES: readonly CitationKeyScheme[] = [
@@ -56,6 +76,7 @@ export async function readSettings(app: App): Promise<ZoteroSettings> {
     keyScheme: SCHEMES.includes(scheme as CitationKeyScheme)
       ? (scheme as CitationKeyScheme)
       : DEFAULT_SETTINGS.keyScheme,
+    fields: { ...DEFAULT_SETTINGS.fields, ...(stored?.fields ?? {}) },
   };
 }
 
@@ -120,6 +141,54 @@ export function renderSettings(app: App, container: HTMLElement): void {
     }
 
     container.append(box);
+
+    const written = document.createElement("fieldset");
+    written.className = "yaz-zotero-settings";
+
+    const heading = document.createElement("legend");
+    heading.textContent = app.i18n.t("zotero-settings-fields");
+    written.append(heading);
+
+    const why = document.createElement("p");
+    why.className = "yaz-zotero-note";
+    why.textContent = app.i18n.t("zotero-settings-fields-detail");
+    written.append(why);
+
+    for (const group of FIELD_GROUPS) {
+      const row = document.createElement("label");
+      row.className = "yaz-zotero-choice";
+
+      const box_ = document.createElement("input");
+      box_.type = "checkbox";
+      box_.checked = current.fields[group];
+      box_.addEventListener("change", () => {
+        const next: ZoteroSettings = {
+          ...current,
+          fields: { ...current.fields, [group]: box_.checked },
+        };
+        void app.settings.set(next).then(() => {
+          draw(next);
+          app.notices.show("zotero-settings-saved");
+        });
+      });
+
+      const words = document.createElement("span");
+      words.className = "yaz-zotero-choice-text";
+
+      const name = document.createElement("span");
+      name.className = "yaz-zotero-choice-label";
+      name.textContent = app.i18n.t(`zotero-fields-${group}`);
+
+      const detail = document.createElement("span");
+      detail.className = "yaz-zotero-choice-detail";
+      detail.textContent = app.i18n.t(`zotero-fields-${group}-detail`);
+
+      words.append(name, detail);
+      row.append(box_, words);
+      written.append(row);
+    }
+
+    container.append(written);
   };
 
   void readSettings(app).then(draw);
