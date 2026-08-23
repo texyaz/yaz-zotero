@@ -39,6 +39,7 @@ import {
   citation,
   citations,
   escapeLatex,
+  figureFromSource,
   quotation,
   unattributed,
 } from "./latex";
@@ -293,12 +294,54 @@ export default class ZoteroPlugin extends Plugin {
 
     switch (drop.kind) {
       case "annotation":
+        // An image annotation marks a *region*, not a passage: it has no words
+        // to quote, and Zotero carries the picture of it on the drag alongside
+        // the citation. So a marked figure can arrive as a figure rather than
+        // as an empty quotation.
+        if (data.images.length > 0) {
+          return this.droppedRegion(drop, data.images[0]!);
+        }
         return this.droppedPassage(drop);
       case "citation":
         return this.droppedSources(drop);
       default:
         return this.droppedProse(drop, data.flavours["text/html"] ?? "");
     }
+  }
+
+  /**
+   * An image annotation: the picture, in a figure that cites its source.
+   *
+   * The picture goes into the project through yaz rather than being written
+   * here, because where a project keeps its pictures is a per-project setting
+   * and the naming has to avoid what is already there — neither of which is
+   * this plugin's to decide.
+   */
+  private async droppedRegion(
+    drop: Extract<ZoteroDrop, { kind: "annotation" }>,
+    image: { type: string; bytes: Uint8Array },
+  ): Promise<string | null> {
+    const path = await this.app.images.save(image.bytes, image.type);
+    // `null` means there was nowhere to put it, and yaz has already said so.
+    // Inserting a figure pointing at a file that is not there would be worse
+    // than the drop doing nothing.
+    if (!path) return null;
+
+    if (!drop.itemKey) {
+      // The picture is real and the source is not identified. The figure is
+      // still worth having; the citation is the one thing left to fill in.
+      this.app.notices.show("zotero-notice-drop-unresolved");
+      return figureFromSource(path, "", drop.pageLabel);
+    }
+
+    const settings = await readSettings(this.app);
+    const entry = await this.app.zotero.ensureInBibliography(
+      drop.itemKey,
+      this.declaredBibliography(),
+      settings.keyScheme,
+      settings.fields,
+    );
+    return figureFromSource(path, entry.key, drop.pageLabel);
   }
 
   /** A highlight: the passage, attributed to the work it came from. */

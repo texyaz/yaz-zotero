@@ -78,3 +78,33 @@ export function quotation(
 export function unattributed(text: string): string {
   return `${B}textquote{${escapeLatex(text.replace(/\s+/g, " ").trim())}}`;
 }
+
+/**
+ * A picture marked in a source, as the figure that cites it.
+ *
+ * The citation goes in the caption rather than beside the image, because that
+ * is where a reader of the printed page looks for where a figure came from —
+ * and because a `\\cite` floating next to an `\\includegraphics` prints in
+ * whatever place the float lands, which is nowhere in particular.
+ *
+ * The caption is otherwise left empty. Only the author knows what the picture
+ * shows, and they will never be better placed to say so than at the moment they
+ * dragged it in.
+ */
+export function figureFromSource(
+  path: string,
+  citationKey: string,
+  pageLabel: string | null,
+): string {
+  const cite = pageLabel
+    ? `${B}cite[${pageLabel}]{${citationKey}}`
+    : `${B}cite{${citationKey}}`;
+  return [
+    `${B}begin{figure}[h]`,
+    `  ${B}centering`,
+    `  ${B}includegraphics[width=0.8${B}textwidth]{${path}}`,
+    `  ${B}caption{${cite}}`,
+    `  ${B}label{fig:}`,
+    `${B}end{figure}`,
+  ].join("\n");
+}
