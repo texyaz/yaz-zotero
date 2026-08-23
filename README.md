@@ -6,18 +6,75 @@ A plugin for [yaz](https://github.com/texyaz/yaz).
 
 ## What it does
 
-Two commands:
+### Drag a source in
+
+Drag an item out of Zotero's list and drop it into the text. yaz writes the
+entry into the `.bib` the document actually loads and puts a citation at the
+drop.
+
+Drag a **highlight** and you get the passage as a quotation with its citation
+attached — the page number included, where the annotation carries one. That is
+the one worth having: reading happens in a PDF viewer and writing happens
+somewhere else, and the passage you marked three weeks ago is exactly what you
+are trying to remember when you sit down to write.
+
+Both work whatever Zotero's **Settings → Export → Quick Copy** format is set to.
+A Markdown drag carries `zotero://select` and `zotero://open-pdf` links, which
+name the item outright; a citation-style drag carries only formatted text, and
+then the item is found by searching the library for its title and its authors.
+When neither identifies it, you are offered the source picker rather than being
+told nothing happened.
+
+### Two commands
 
 - **Cite from Zotero** — search the library, choose an item, and get a
-  `\parencite{key}` at the caret. The entry is copied into the project's
-  bibliography on the way, so the document builds on a machine that has never
-  heard of Zotero.
+  `\parencite{key}` at the caret.
 - **Quote a passage** — the highlights and notes you made while reading an
   attachment, listed so you can drop one into the text with its citation.
 
-The second is the one worth having. Reading happens in a PDF viewer and writing
-happens somewhere else, and the passage you marked three weeks ago is the thing
-you are trying to remember when you sit down to write.
+### The Citations tab
+
+Every work the document cites, with how many times. Clicking one steps through
+its occurrences — press again for the next. The tab is core; this plugin only
+fills the bibliography it reads.
+
+## Citation keys, three ways
+
+Set under **Settings → Plugins → Zotero**.
+
+| Scheme | What a key looks like | Why |
+| --- | --- | --- |
+| **Readable key with a hidden item id** | `spielbauer2020` | Reads as a key a person wrote, and carries Zotero's item id in a `note` field so the entry can still be found later |
+| **The item key itself** | `5F6XQK29` | Unambiguous and stable. Zotero renames nothing, so neither does the document |
+| **Better BibTeX** | `spielbauer_bki_2020` | The keys the Better BibTeX extension already generates, for a library that uses it |
+
+The third currently falls back to a readable key: reading Better BibTeX's own
+keys needs its API, which is [on the roadmap](ROADMAP.md) and not yet built.
+It is listed rather than hidden because which scheme a document uses is a
+decision worth making before there are two hundred citations in it.
+
+## What ends up in the `.bib`
+
+By default: the fields the entry type needs to print correctly, and no more.
+Under the plugin's settings you can ask for more — abstracts, keywords, file
+paths, the lot — because a `.bib` that carries everything is either a useful
+archive or an unreadable one depending on who is looking at it.
+
+**Refresh from Zotero** re-reads the entries the document cites and rewrites
+them, so a title corrected in Zotero reaches the paper. It matches on the item
+id rather than the citation key, which is why the id is worth keeping.
+
+The project's `.bib` remains the compile-time source of truth
+([ADR-0008](https://texyaz.github.io/yaz/adr/0008-zotero-integration)) — so the
+document builds on a co-author's machine that has never heard of Zotero.
+
+## When Zotero is not running
+
+If it is installed, you are offered to start it. If it is not, you are told so
+rather than being left with a search that returns nothing.
+
+Reading the library **online**, from zotero.org, is deliberately not built yet;
+it is [on the roadmap](ROADMAP.md).
 
 ## It reads a copy, and it says which
 
