@@ -116,7 +116,10 @@ export default class ZoteroPlugin extends Plugin {
      * compiler will resolve, which is why both are asked for.
      */
     this.registerDropHandler({
-      flavours: ["text/html", "text/plain", "text/uri-list"],
+      // `Files` as well as the text flavours: an image annotation dragged out
+      // of Zotero can be a picture and nothing else, and a handler that only
+      // asked about text never heard about it.
+      flavours: ["text/html", "text/plain", "text/uri-list", "Files"],
       handle: (dropped) => this.dropped(dropped),
     });
 
@@ -292,15 +295,24 @@ export default class ZoteroPlugin extends Plugin {
       drop = readZoteroUris(data.flavours["text/uri-list"] ?? "") ?? drop;
     }
 
+    /*
+     * A picture beats everything else the drag carried.
+     *
+     * An image annotation marks a *region*, not a passage: there are no words
+     * to quote, and what the reader dragged is the picture. Whether the drag
+     * also carried a citation only decides whether the figure can name its
+     * source — not whether there is a figure.
+     *
+     * This is checked before the kind, because the kinds are about *text*: an
+     * image annotation whose drag carried no `zotero://` link reads as prose,
+     * and prose with no words in it used to end at the source picker with
+     * nothing to show for it.
+     */
+    const picture = data.images[0];
+    if (picture) return this.droppedRegion(drop, picture);
+
     switch (drop.kind) {
       case "annotation":
-        // An image annotation marks a *region*, not a passage: it has no words
-        // to quote, and Zotero carries the picture of it on the drag alongside
-        // the citation. So a marked figure can arrive as a figure rather than
-        // as an empty quotation.
-        if (data.images.length > 0) {
-          return this.droppedRegion(drop, data.images[0]!);
-        }
         return this.droppedPassage(drop);
       case "citation":
         return this.droppedSources(drop);
@@ -310,15 +322,20 @@ export default class ZoteroPlugin extends Plugin {
   }
 
   /**
-   * An image annotation: the picture, in a figure that cites its source.
+   * A dragged picture, in a figure that cites where it came from.
    *
    * The picture goes into the project through yaz rather than being written
    * here, because where a project keeps its pictures is a per-project setting
    * and the naming has to avoid what is already there — neither of which is
    * this plugin's to decide.
+   *
+   * When the drag did not say which work it came from, the source picker is
+   * offered rather than the figure being left unattributed. That is the same
+   * courtesy a dropped reference gets, and it is what somebody dragging a
+   * figure out of a paper they are citing plainly wants.
    */
   private async droppedRegion(
-    drop: Extract<ZoteroDrop, { kind: "annotation" }>,
+    drop: ZoteroDrop,
     image: { type: string; bytes: Uint8Array },
   ): Promise<string | null> {
     const path = await this.app.images.save(image.bytes, image.type);
@@ -327,21 +344,43 @@ export default class ZoteroPlugin extends Plugin {
     // than the drop doing nothing.
     if (!path) return null;
 
-    if (!drop.itemKey) {
-      // The picture is real and the source is not identified. The figure is
-      // still worth having; the citation is the one thing left to fill in.
-      this.app.notices.show("zotero-notice-drop-unresolved");
-      return figureFromSource(path, "", drop.pageLabel);
+    const marked = drop.kind === "annotation" ? drop : null;
+    const itemKey =
+      marked?.itemKey ??
+      (drop.kind === "citation" ? (drop.items[0]?.itemKey ?? null) : null);
+
+    if (!itemKey) {
+      const picked = await this.pickItem();
+      // A dismissed picker still leaves the picture worth having: it is in the
+      // project either way, and a figure with an empty citation is one thing
+      // to fill in rather than a paste that did nothing.
+      if (!picked) {
+        return figureFromSource(path, "", marked?.pageLabel ?? null);
+      }
+      return figureFromSource(
+        path,
+        await this.citationKey(picked.key),
+        marked?.pageLabel ?? null,
+      );
     }
 
+    return figureFromSource(
+      path,
+      await this.citationKey(itemKey),
+      marked?.pageLabel ?? null,
+    );
+  }
+
+  /** The key an item is cited by, putting it in the bibliography on the way. */
+  private async citationKey(itemKey: string): Promise<string> {
     const settings = await readSettings(this.app);
     const entry = await this.app.zotero.ensureInBibliography(
-      drop.itemKey,
+      itemKey,
       this.declaredBibliography(),
       settings.keyScheme,
       settings.fields,
     );
-    return figureFromSource(path, entry.key, drop.pageLabel);
+    return entry.key;
   }
 
   /** A highlight: the passage, attributed to the work it came from. */
