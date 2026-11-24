@@ -15,6 +15,23 @@
       "kind": "fs-project"
     }
   ],
+  "provides": {
+    "tools": [
+      {
+        "name": "search_library",
+        "descriptionKey": "zotero-tool-search-library"
+      },
+      {
+        "name": "list_highlights",
+        "descriptionKey": "zotero-tool-list-highlights"
+      },
+      {
+        "name": "add_to_bibliography",
+        "descriptionKey": "zotero-tool-add-to-bibliography",
+        "writes": true
+      }
+    ]
+  },
   "updates": {
     "source": "github",
     "repository": "texyaz/yaz-zotero",

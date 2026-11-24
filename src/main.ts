@@ -30,6 +30,7 @@ import {
   type ZoteroItem,
 } from "@yaz/api";
 
+import { agentTools } from "./agent";
 import { readZoteroDrop, readZoteroUris } from "./drop";
 import { readSettings, renderSettings } from "./settings";
 import type { CommentHandling } from "./settings";
@@ -37,6 +38,8 @@ import { SETTINGS_STYLE } from "./style";
 import type { ZoteroDrop } from "./drop";
 import {
   citation,
+  annotationMarkAt,
+  citationKeyAt,
   citations,
   escapeLatex,
   figureFromSource,
@@ -130,6 +133,49 @@ export default class ZoteroPlugin extends Plugin {
     styleOnce();
 
     this.addCommand({
+      id: "reveal",
+      nameKey: "zotero-command-reveal",
+      descriptionKey: "zotero-command-reveal-description",
+      defaultHotkey: "Mod+Shift+O",
+      isAvailable: () => this.app.editor !== null,
+      callback: () => this.reveal(),
+    });
+
+    // The same jump, as its own button: only ever the highlight behind a
+    // marked sentence (ADR-0030). Separate so the white-box step is visible
+    // under Connections, and reachable when a browser in between (noVNC)
+    // swallows the shortcut.
+    this.addCommand({
+      id: "reveal-highlight",
+      nameKey: "zotero-command-reveal-highlight",
+      descriptionKey: "zotero-command-reveal-highlight-description",
+      isAvailable: () => this.app.editor !== null,
+      callback: () => this.reveal(true),
+    });
+
+    // Right-click on a work in the Citations tab (ADR-0032). The tab is
+    // yaz's; showing the work in Zotero is this plugin's to offer.
+    this.registerCitationAction({
+      id: "show-in-zotero",
+      labelKey: "zotero-citation-show",
+      isAvailable: async () => (await this.app.zotero.status()).kind !== "none",
+      run: async (key) => {
+        if (!(await this.app.zotero.reveal(key))) {
+          this.app.notices.show("zotero-notice-citation-not-in-library", { key });
+        }
+      },
+    });
+
+    // What an AI agent may do through yaz's MCP server (ADR-0031): find
+    // sources and highlights, and write only as \ai[KEY]{…}.
+    for (const tool of agentTools({
+      app: this.app,
+      citationKey: (itemKey) => this.citationKey(itemKey),
+    })) {
+      this.registerTool(tool);
+    }
+
+    this.addCommand({
       id: "refresh-bibliography",
       nameKey: "zotero-command-refresh",
       descriptionKey: "zotero-command-refresh-description",
@@ -143,6 +189,61 @@ export default class ZoteroPlugin extends Plugin {
       descriptionKey: "zotero-command-reconnect-description",
       callback: () => this.reconnect(),
     });
+  }
+
+  /**
+   * Show what the cursor is on in Zotero, as precisely as the text allows.
+   *
+   * Inside a white-box marker, `\ai[KEY]{…}` or `\proofed[KEY]{…}`
+   * (ADR-0030), that is the highlight itself: the PDF opens at the passage the
+   * sentence rests on. With several keys, the one under the cursor, or else the
+   * one in the source whose `\cite` the cursor is on. Elsewhere it is the
+   * source of the citation under the cursor, as before.
+   *
+   * Which item or annotation, and which library it is in, is the Rust side's
+   * question to answer; this only says which keys the cursor is on.
+   */
+  private async reveal(onlyHighlight = false): Promise<void> {
+    const editor = this.app.editor;
+    if (!editor) {
+      this.app.notices.show("zotero-notice-no-editor");
+      return;
+    }
+    const text = editor.getText();
+    const offset = editor.getSelection().from;
+    const mark = annotationMarkAt(text, offset);
+    const key = citationKeyAt(text, offset);
+    if (onlyHighlight && !(mark && mark.keys.length > 0)) {
+      this.app.notices.show("zotero-notice-no-highlight-here");
+      return;
+    }
+    try {
+      if (mark && mark.keys.length > 0) {
+        const keys = mark.keyAtCursor ? [mark.keyAtCursor] : mark.keys;
+        if (await this.app.zotero.revealAnnotation(keys, key)) return;
+        if (!key || onlyHighlight) {
+          this.app.notices.show("zotero-notice-highlight-not-in-library", {
+            key: keys.join(", "),
+          });
+          return;
+        }
+        // The sentence names a highlight the copy does not have yet; the
+        // source is the next best thing, and the notice says why.
+        this.app.notices.show("zotero-notice-highlight-not-in-library", {
+          key: keys.join(", "),
+        });
+      }
+      if (!key) {
+        this.app.notices.show("zotero-notice-no-citation-here");
+        return;
+      }
+      if (!(await this.app.zotero.reveal(key))) {
+        this.app.notices.show("zotero-notice-citation-not-in-library", { key });
+      }
+    } catch (error) {
+      this.app.notices.show("zotero-notice-reveal-failed");
+      console.warn("[yaz] showing a citation in Zotero failed", error);
+    }
   }
 
   /**

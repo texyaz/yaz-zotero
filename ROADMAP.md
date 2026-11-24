@@ -36,6 +36,12 @@ and is only acted on when exactly one item matches.
 
 ## Next
 
+- **White-box AI writing (ADR-0030, proposed).** Done: inside
+  `\ai[ANNKEY]{…}` / `\proofed[ANNKEY]{…}`, `Mod+Shift+O` opens the PDF at the
+  highlight (`zotero.revealAnnotation`). Next: a "Proofed by human" tab listing
+  every mark with its passage and the AI's comment, and turning `\ai` into
+  `\proofed` as an ordinary edit. Annotations are still only read.
+
 - **Better BibTeX (tier 1).** Citation keys that Zotero owns, so a key here
   matches the key in a co-author's document. Without it the keys are ours and
   the interface says so, which is the honest version of the same thing but not
